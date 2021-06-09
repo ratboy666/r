@@ -1,0 +1,555 @@
+; R.MAC
+;
+; RUN CUSP (COMMONLY USED SYSTEM PROGRAM). FROM TOPS-10. NEEDED
+; UNDER CP/NET AND UNPATCHED CCP. USE SETDRU TO REDIRECT DATA
+; FILES IF NEEDED. ALSO LOOKS IN A0:COMMAND.LBR FOR THE PROGRAM,
+; AND LOADS IT FROM THERE IF NEEDED.
+;
+; ASSUMES THAT CCP SIZE IS 8 OR 12 PAGES. CCP FOR STANDARD CP/M
+; IS 2K (8 PAGES). CCP FOR CP/NET 1.2 IS 12 PAGES (BY TRIAL AND
+; ERROR).
+;
+; WE GET FILE SIZE, AND IF LARGE (OVERLAY CCP) WE ACCOMODATE
+; THAT. THIS NEEDS TESTING. RAW CCP CAN LOAD "SAVE 213" OBJECT
+; FILE. R CAN LOAD THE SAME. BUT, R SHOULD BE CAPABLE OF LOADING
+; LARGER. SINCE CCP IS 8 PAGES, AND WE ARE ONLY 1 PAGE, WE
+; SHOULD BE ABLE TO LOAD 7 MORE PAGES OR SO. NOTE THAT WE DO HAVE
+; "*MEM*" IN THE LOADER ITSELF AS THE FINAL CATCH FOR LOAD SIZE.
+;
+; LOADER ADDRESS IS EITHER 12, 8, or 2 PAGES BELOW BDOS. WE
+; COMPARE BDOS AND STACK POINTER. IF STACK IS ABOVE BDOS, IT IS
+; INSIDE OF CCP, AND SOMETHING HAS BEEN LOADED BELOW. IN THAT
+; CASE, WE REDUCE BY ONLY 2 PAGES AND LOAD. THIS IS BECAUSE THE
+; CCP IS ALREADY PROTECTED (OR NOT - BUT OUT OF OUR CONTROL).
+;
+; TEKTONICS:
+;
+;     M80 =R/L
+;     L80 /P:100,R,R/N/E
+
+        .8080
+
+WBOOT   EQU      0
+BDOS    EQU      5
+PSTRNG  EQU      9 
+CR      EQU      13
+LF      EQU      10
+GETVER  EQU      12
+OPEN    EQU      15
+CLOSE   EQU      16
+SETDMA  EQU      26
+READ    EQU      20
+SETUSR  EQU      32
+READR   EQU      33
+FILSIZ  EQU      35
+TPA     EQU      100H
+FCB	EQU	 5CH
+FCB2    EQU      6CH
+CMDLIN  EQU      80H
+
+FCB.DR  EQU      0
+FCB.F1  EQU      1              ; F1..F8
+FCB.T1  EQU      9              ; T1..T3
+FCB.EX  EQU      12
+FCB.S1  EQU      13
+FCB.S2  EQU      14
+FCB.RC  EQU      15
+FCB.D0  EQU      16
+FCB.CR  EQU      32
+FCB.R0  EQU      33
+FCB.R1  EQU      34
+FCB.R2  EQU      35
+FCBSIZ  EQU      36
+
+DEFBUF	EQU      80H
+
+; EDIT SYSDSK AND SYSUSR TO REFLECT THE LOCATION OF THE
+; COMMON .COM FILES AND COMMAND.LBR ON YOUR SYSTEM. I
+; USE A0:.. A15: IS LIKELY. ALSO CONSIDER CHANGING THE
+; NAME COMMAND.LBR BELOW
+
+SYSDSK  EQU      1              ; SYS DISK (A:)
+SYSUSR  EQU      0              ; SYS USER (0)
+
+NETPGS  EQU      12             ; PAGES TO PROTECT NETCCP
+BDSPGS  EQU      2              ; BDOS BELOW CCP
+CCPPGS  EQU      8              ; PLAIN CCP
+
+        CSEG
+
+START:: LDA      CMDLIN         ; AT LEAST ONE PUBLIC FOR
+        ORA      A              ; SYMX TO WORK.
+        JNZ      HAVCMD
+
+; R<ENTER>
+;
+; THIS DISPLAYS HELP
+
+	CALL     ERR
+ DB 'R 1.00',CR,LF,LF
+ DB '  R PROGRAM PARAMS',CR,LF,LF
+ DB 'LOAD PROGRAM FROM COMMON AREA OR LBR',CR,LF,'$'
+
+ERR:    POP      D
+        MVI      C,PSTRNG
+        JMP      BDOS
+
+HAVCMD: LDA      CMDLIN         ; LIMIT TO 126 CHARS
+        CPI      126
+        JC       LENOK
+        MVI      A,126
+        STA      CMDLIN
+LENOK:  ADI      CMDLIN+1
+        MOV      L,A
+        MVI      H,0
+        MOV      M,H            ; ZERO TERMINATE
+
+        CALL     INIFCB         ; PARSE COMMAND INTO FCB. CCP
+        LXI      H,CMDLIN+1     ; DOES THIS FOR US, BUT IF WE
+        LXI      D,FCB		; ARE USED IN A SHELL WE WILL
+        CALL     PARSE		; NEED THIS.
+
+        MVI      L,CMDLIN+1
+        MOV      D,H
+        MOV      E,L
+
+        CALL     $$SKP          ; SKIP LEADING SPACES
+
+SKIPN:  MOV      A,M            ; SKIP PROGRAM NAME
+        ORA      A              ; ZERO IS END OF LINE
+        JZ       EOL
+        CPI      ' '            ; SPACE ENDS PROGRAM NAME
+        JZ       CTMOV
+        INX      H
+        JMP      SKIPN
+
+EOL:    STAX     D              ; WORDSTAR NEEDS THIS
+        JMP      UPLEN
+
+CTMOV:  MOV      A,M            ; MOVE COMMAND TAIL DOWN
+        STAX     D
+        INX      D
+        INX      H
+        ORA      A
+        JNZ      CTMOV
+
+        MOV      A,E            ; DE IS ONE PAST TERM 0
+        SUI      82H            ; UPDATE LENGTH
+UPLEN:  STA      CMDLIN
+
+        MVI      C,SETUSR       ; GET USER
+        MVI      E,0FFH
+        CALL     BDOS
+        STA      LOADER+USER    ; SAVE INTO LOADER
+
+        MVI      A,SYSDSK       ; FORCE DRIVE SYSDSK
+        STA      FCB+FCB.DR
+
+        LXI      H,FCB+FCB.T1   ; FORCE '.COM'
+        MVI      M,'C'
+        INX      H
+        MVI      M,'O'
+        INX      H
+        MVI      M,'M'
+
+        MVI      L,FCB+FCB.EX   ; ZERO REMAINING FCB
+        MVI      B,FCBSIZ-12
+        CALL     $$FILZ
+
+        MVI      C,SETUSR       ; FORCE USER SYSUSR
+        MVI      E,SYSUSR
+        CALL     BDOS
+
+        LXI      D,FCB		; COPY FCB INTO LOADER
+        LXI      H,LOADER+TFCB
+        MVI      B,FCBSIZ
+        CALL     $$MOV
+
+        LXI      D,LOADER+TFCB	; OPEN LOADER FCB
+        MVI      C,OPEN
+        CALL     BDOS
+        INR      A
+        JNZ      OKFILE
+
+        LXI      H,LBRFC2
+        MVI      B,24
+        CALL     $$FILZ
+
+        LXI      D,LBRFCB       ; PROG NOT IN A0:,
+        LXI      H,LOADER+TFCB  ; TRY A0:COMMAND.LBR
+        MVI      B,FCBSIZ
+        CALL     $$MOV
+
+        LXI      D,LOADER+TFCB
+        MVI      C,OPEN
+        CALL     BDOS
+        INR      A
+        JZ       NOPROG         ; NO LIBRARY
+
+        LXI      D,LBRBUF	; 80H IS COMMAND LINE,
+        MVI      C,SETDMA	; SET NEW DMA
+        CALL     BDOS
+
+        LXI      D,LOADER+TFCB	; READ LBR HEADER
+        MVI      C,READ
+        CALL     BDOS
+
+        LDA      LBRBUF+14      ; DIR RECORDS
+        MOV      C,A
+        LXI      D,LBRBUF+32    ; START OF DIRECTORY
+        MVI      B,3            ; # RECORDS IN SECTOR 1
+DIRTOP: LXI      H,FCB+1
+        PUSH     B
+        PUSH     D
+        LDAX     D              ; FIRST BYTE NOT 0
+        INX      D
+        ORA      A
+        JNZ      ENDNAM         ; ..SKIP
+        MVI      B,11           ; COMPARE NAMES
+CMPNAM: LDAX     D
+        CMP      M
+        JNZ      ENDNAM         ; NO MATCH
+        INX      D
+        INX      H
+        DCR      B
+        JNZ      CMPNAM
+ENDNAM: POP      D
+        POP      B
+        JZ       LBRMAT         ; WE HAVE A MATCH AT DE
+        LXI      H,32           ; TO NEXT DIR ENTRY
+        DAD      D
+        XCHG
+        DCR      B
+        JNZ      DIRTOP
+        LXI      D,LOADER+TFCB  ; EXHAUSTED THIS SECTOR
+        PUSH     B
+        MVI      C,READ		; READ NEXT SECTOR
+        CALL     BDOS
+        POP      B		; IGNORE READ ERROR (!)
+        LXI      D,LBRBUF	; START OF SECTOR
+        MVI      B,4		; 4 ENTRIES PER SECTOR
+        DCR      C
+        JNZ      DIRTOP
+        JMP      NOPROG		; NO MATCH, DIR DONE...
+
+LBRMAT: PUSH     D              ; LBR MATCH
+        LXI      H,14		; EXTRACT AND SAVE NRECS
+        DAD      D
+        MOV      A,M
+        INX      H
+        MOV      H,M
+        MOV      L,A
+        POP      D
+        PUSH     H
+
+        LXI      H,12           ; STARTING RECORD
+        DAD      D
+        MOV      A,M
+        INX      H
+        MOV      H,M
+        MOV      L,A
+
+        SHLD     LOADER+TFCB+FCB.R0
+        LXI      D,LOADER+TFCB	; SEEK TO STARTING RECORD
+        MVI      C,READR	; FIRST RECORD READ TWICE
+        CALL     BDOS		; 2ND TIME IS IN HIGH LOADER
+
+        POP      H		; FAKE FILSIZ FROM NRECS
+        SHLD     LOADER+TFCB+FCB.R0
+        JMP      LCOM		; TO LOAD COMMON
+
+NOPROG: LDA      LOADER+USER	; NO PROGRAM
+        MOV      E,A		; RESTORE USER
+        MVI      C,SETUSR
+        CALL     BDOS
+
+        CALL     ERR		; GIVE ERROR MESSAGE
+        DB       'NAME?',CR,LF,'$'
+
+OKFILE: LXI      D,LOADER+TFCB  ; GET FILE SIZE
+        MVI      C,FILSIZ
+        CALL     BDOS
+
+LCOM:   LDA      LOADER+TFCB+FCB.R1
+        ANI      0FEH		; >= 512 RECORDS
+        JNZ      TOOBIG
+
+        LHLD     LOADER+TFCB+FCB.R0
+        SHLD     NRECS		; UPDATE NRECS
+        INX      H
+        MOV      A,H
+        RRC
+        MOV      A,L
+        RAR                     ; A = PAGES IN PROGRAM
+        MOV      B,A
+
+        LDA      BDOS+2
+        MOV      C,A
+        SUI      BDSPGS
+        CMP      B
+        JNC      CHKNET
+
+TOOBIG: CALL     ERR
+        DB       'SIZE?',CR,LF,'$'
+
+CHKNET: MOV      A,C
+        SUI      NETPGS
+        CMP      B
+        JNC      SIZOK
+
+        LXI      H,WBOOT	; TOO BIG TO NOT OVERLAY CCP
+        XTHL			; WILL FIT, BUT NEEDS CCP
+        MVI      A,1		; OVERLAY WITH R. REPLACE
+        STA      FFLAG		; CCP RET ADDR WITH WBOOT.
+
+SIZOK:  CALL     INIFCB		; INITIALIZE FCB
+        LXI      H,CMDLIN+1	; PARSE COMMAND LINE TO FCB
+        LXI      D,FCB
+        CALL     PARSE
+        LXI      D,FCB2		; AND FCB2
+        CALL     PARSE
+
+        LDA      FFLAG          ; IF WE *MUST* OVERLAY CCP
+        ORA      A              ; THEN DO IT NOW
+        JNZ      TOPTOP
+        MVI      C,GETVER       ; GET VERSION
+        CALL     BDOS		; TO DETERMINE IF WE HAVE
+        MOV      A,H		; CP/NET LOADED
+        ANI      2
+        MVI      B,CCPPGS       ; PAGES FOR CP/M 2.2
+        JZ       NONET
+        MVI      B,NETPGS       ; PAGES FOR CP/NET 1.2
+NONET:  LDA      BDOS+2 
+        LXI      H,0
+        DAD      SP
+        CMP      H
+        JNC      ADJ
+TOPTOP: MVI      B,BDSPGS       ; PAGES IF RESIDENT PGM
+ADJ:    LHLD     BDOS+1
+        MOV      A,H
+        SUB      B              ; 2 OR 12/8
+        MOV      H,A
+        MVI      L,0
+
+        LXI      D,LOADER	; MOVE LOADER TO HIGH MEMORY
+        MVI      B,ENDIPL-IPL	; NOTE IT IS PAGE ALIGNED
+        CALL     $$MOV
+        MOV      L,B            ; HL = LOADER ADR
+        PUSH     H              ; 'RET' TO LOADER
+
+; RELOCATIONS TO HIGH LOADER
+;
+; WE DO NOT USE KEY VALUE (FD) FOR RELOCATION BECAUSE WE
+; RELOCATE AN OPEN FCB. THIS MAY CONTAIN THE KEY VALUE! AND
+; WE CANNOT COMPREHENSIVELY TEST BECAUSE THIS IS OS DEPENDENT.
+; SO, WE USE A RELOCATION TABLE TO FIX THE CODE AFTER MOVING.
+
+        XCHG
+        LHLD     NRECS          ; NRECS TO BC FOR IPL
+        MOV      B,H
+        MOV      C,L
+        XCHG
+        LXI      D,LOCTAB
+RELOC:  LDAX     D
+        ORA      A
+        MOV      L,A
+        RZ                      ; TO LOADER WHEN DONE
+        MOV      M,H            ; HL=LOADER ADDR
+        INX      D
+        JMP      RELOC
+
+LOCTAB: DB       X0+2           ; RELOCATION TABLE
+        DB       X1+1
+        DB       X2+2
+        DB       X3+2
+        DB       X4+2
+        DB       X5+2
+        DB       X6+2
+        DB       X7+2
+        DB       0
+
+LOADER:				; HIGH LOADER
+        .PHASE   0		; MUST BE < 256 BYTES
+IPL:
+        LXI      H,TPA
+IPL1:   MOV      A,B            ; BC = NRECS
+        ORA      C
+X7:     JZ       IPLDON
+        XCHG
+        PUSH	 D
+        PUSH     B
+        MVI      C,SETDMA
+        CALL     BDOS
+X4:     LXI      D,TFCB
+        MVI      C,READ
+        CALL     BDOS
+        POP      B
+        POP      D
+        ORA      A
+X0:     JNZ      IPLDON         ; EOF
+        LXI      H,128
+        DAD      D
+X1:     MVI      A,IPL/256      ; MEM OVERLOW?
+        CMP      H
+        DCX      B
+X2:     JNZ      IPL1
+X3:     LXI      D,OVFMSG
+        MVI      C,PSTRNG
+        CALL     BDOS
+        JMP      WBOOT
+
+; LOAD COMPLETE
+
+IPLDON: LXI      D,DEFBUF       ; RESET DMA
+        MVI      C,SETDMA
+        CALL     BDOS
+
+X6:     LDA      USER           ; RESTORE USER CODE
+        MOV      E,A
+        MVI      C,SETUSR
+        CALL     BDOS
+
+X5:     LXI      D,TFCB         ; CLOSE FILE
+        MVI      C,CLOSE
+        CALL     BDOS
+
+        JMP      TPA
+
+OVFMSG: DB       'OVFL?',CR,LF,'$'
+USER:   DS       1
+TFCB:	DS	 FCBSIZ
+ENDIPL:
+        .DEPHASE	
+
+$$MOV:  LDAX     D		; MOVE DL TO HL FOR B BYTES
+        MOV      M,A
+        INX      D
+        INX      H
+        DCR      B
+        JNZ      $$MOV
+        RET
+
+$$FILN: MVI      B,8+3          ; FILL NAME
+$$FILS: MVI      A,' '          ; FILL SPACES
+        DB       (MVI C)        ; SKIP FOLLOWING BYTE
+$$FILZ: XRA      A              ; ZERO MEMORY
+$$FIL:  MOV      M,A		; FILL HL WITH A FOR B
+        INX      H
+        DCR      B
+        JNZ      $$FIL
+        RET
+
+$$SKP:  MOV      A,M		; SKIP SPACES
+        CPI      ' '
+        INX      H
+        JZ       $$SKP
+        DCX      H
+        RET
+
+; PARSE HL TO FCB DE DRIVE + 8 BYTES NAME + 3 BYTES EXT. FIELDS
+; ARE SET UP TO SPACE, AND DRIVE ZERO BEFORE ENTRY.
+;
+; THIS ATTEMPTS TO REPLICATE THE PARSING DONE BY CCP EXACTLY,
+; WITHOUT SHARING ANY CCP CODE. THIS IS DONE TO MAXIMIZE
+; COMPATIBILITY WITH CCP AND LAUNCHED PROGRAMS.
+
+PARSE:  CALL     $$SKP
+        ORA      A
+        RZ
+        INX      H
+
+        MOV      A,M
+        CPI      ':'
+        DCX      H
+        JNZ      NAME
+
+DRIVE:  MOV      A,M
+        ORA      A
+        RZ
+        SUI      '@'
+        INX      H
+        INX      H
+        STAX     D
+
+NAME:   INX      D		; NAME
+        MVI      B,8
+        CALL     NORE
+        RZ
+
+EXT:    MOV      A,B            ; TO EXT FIELD
+        ADD      E
+        MOV      E,A
+TODOT:  MOV      A,M            ; SKIP TO '.' WHICH
+        CALL     RESERV         ; SEPARATES NAME AND EXT
+        RZ
+        CPI      '.'
+        INX      H
+        JNZ      TODOT
+
+        MVI      B,3
+
+NORE:   MOV      A,M		; NAME OR EXTENSION
+        CALL     RESERV
+        RZ
+        CPI      '.'
+        JZ       NZRET
+        CPI      '*'
+        JZ       QFIL
+        STAX     D
+        INX      D
+        INX      H
+        DCR      B
+        JNZ      NORE
+NZRET:  MVI      A,1
+        ORA      A
+        RET
+QFIL:   INX      H
+QFIL1:  MOV      A,B
+        ORA      A
+        JZ       NZRET
+        MVI      A,'?'
+        STAX     D
+        INX      D
+        DCR      B
+        JMP      QFIL1
+
+RESERV: ORA      A              ; NUL NOT ALLOWED
+        RZ
+        CPI      ' '            ; OR SPACE, OR...
+        RZ
+        CPI      ':'		; ':;_<=>'
+        RZ                      ; JUST MATCHING 2.2 CCP
+        CPI      ';'            ; $ AND / MUST BE ALLOWED
+        RZ                      ; EG: STAT FN $R/O
+        CPI      '_'
+        RZ
+        CPI      '<'
+        RZ
+        CPI      '='
+        RZ
+        CPI      '>'
+        RET
+
+INIFCB: LXI      H,FCB		; INITIALIZE FCB
+        MVI      B,FCBSIZ	; FILL FCB WITH 0
+        CALL     $$FILZ
+        MVI      L,FCB+FCB.F1   ; FILL NAME,EXT WITH ' '
+        CALL     $$FILN
+        MVI      L,FCB2+FCB.F1  ; FOR FCB2 TOO
+        JMP      $$FILN
+
+NRECS:  DW       0
+FFLAG:  DB       0
+LBRFCB: DB       SYSDSK
+        DB       'COMMAND '
+        DB       'LBR'
+
+; DO NOT ADD UNINITIALIZED DATA INTO COM FILE
+
+LBRFC2  EQU      $
+LBRBUF  EQU      LBRFC2+24
+MEMEND  EQU      LBRBUF+128
+
+
+        END      START
+                                             

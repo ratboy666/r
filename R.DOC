@@ -1,0 +1,50 @@
+Ò 1.00
+
+     Ò  (R.COM© ió á prograí loadeò foò CP/Í 2.² Iô resembleó thå 
+Ò  commanä iî TOPS-10¬  iî thaô iô loaä commoî  systeí  programs® 
+CP/Í 2.² needó á loadeò foò anythinç beyonä itó built-iî commandó 
+(TYPE¬  ERA¬  DIR¬  REN¬ SAVÅ anä USER)® Thå CCĞ (Consolå Commanä 
+Processor©  iî CP/Í 2.² attemptó tï loaä unknowî commandó foò thå 
+currenô  disë anä user®  Wå wanô tï havå á singlå copù  oæ  theså 
+programs¬  anä Ò attemptó tï loaä thå commanä froí disë A:¬  useò 
+0®
+
+     Iæ  thå  prograí  cannoô  bå founä  oî  Drivå  A:¬  Useò  0¬ 
+A0:COMMAND.LBÒ   ió  examined®   Iæ  thå  prograí  ió  founä   iî 
+COMMAND.LBR¬ iô wilì bå loadeä froí there.
+
+     Ò waó writteî usinç Microsofô M80® Iô waó fuî tï procesó thå 
+commanä linå anä replacå thå CCĞ prograí loader®  R.COÍ relocateó 
+á smalì loadeò tï thå toğ oæ memory¬  respectinç CCĞ (sï STAT.COÍ 
+anä  otheò  utilitieó  thaô normallù returî tï  CCĞ  continuå  tï 
+functioî  aó normal)®  Iæ XSUB.COÍ oò anotheò residenô utilitù ió 
+present¬  thå CCĞ doeó noô neeä tï bå protected® R.COÍ recognizeó 
+this®  Thå FCÂ prototypeó aô 005Ã anä 006Ã arå seô uğ aó thå  CCĞ 
+would®  Thå  commanä linå itselæ ió editeä tï removå thå  prograí 
+name® "Ò STAÔ A:¢ ió editeä tï looë likå "STAÔ A:".
+
+     Iæ thå prograí ió toï largå tï load¬  aî overflo÷ messagå ió 
+issued® Iæ thå prograí doeó noô exisô oî A:¬ useò 0¬ á messagå ió 
+issued. In both cases, the R command is abandoned.
+
+     R.COÍ ió testeä witè thå CP/Í 2.² CCP¬  thå CP/NEÔ  1.² CCP¬ 
+anä  á varietù oæ residenô  programsº  DESPOOL¬  XSUB¬  WHM¬  anä 
+others®  R.COÍ  ió  awarå oæ standarä CP/Í 2.² CCĞ sizå (2K©  anä 
+CP/NEÔ  1.² CCĞ sizå (3K)®  Botè oæ theså arå protecteä wheî  thå 
+prograí  loaä  ió done®  Iî future¬  thå prograí  sizå  coulä  bå 
+determined¬  anä  iæ CCĞ overlaù ió needed¬  thå loadeò coulä  bå 
+relocateä  intï thå CCĞ area®  R.COÍ determineó iæ thå CCĞ  needó 
+protectioî  bù comparinç thå stacë pointeò tï thå BDOÓ entry®  Iæ 
+thå  stacë  pointeò  ió  belo÷  thå  BDOS¬  thió  indicateó  thaô 
+somethinç ió loadeä belo÷ thå CCĞ and¬ thus¬ thå CCĞ ió protecteä 
+anyway® Iî thió case¬ thå loadeò cannoô overlaù thå CCP.
+
+     R.COÍ  ió noô reallù á "patè search¢ program®  Iô followó tï 
+TOPS-1° model¬ anä onlù loadó froí á specifiã area® Ò waó writteî 
+becauså thå Mikå Douglaó ALTAIÒ 880° harä disë BIOÓ thaô  patcheä 
+BDOÓ  faileä iæ thå applicatioî beinç loadeä waó largeò thaî  onå 
+extenô  (and¬  iæ  CP/NEÔ ió used¬  thå patè searcè doesn'ô  worë 
+either)® Eveî programó likå MBASIC.COÍ coulä noô bå loaded¡ Usinç 
+Ò  workó witè normaì CP/Í anä CP/NEÔ 1.2¬  anä loadó alì programó 
+(including MBASIC).
+
